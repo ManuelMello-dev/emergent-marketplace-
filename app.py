@@ -1,21 +1,13 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
 import pennylane as qml
-import torch
 
 # --- 1. CONFIGURATION & ANCHORS ---
 st.set_page_config(page_title="Bootstrap Physics Node", layout="wide", page_icon="Φ")
-PHI = (1 + np.sqrt(5)) / 2  # The Golden Ratio (from quantum_harmonics.py)
+PHI = (1 + np.sqrt(5)) / 2  # The Golden Ratio
 
-# Constants from PDF (Bootstrap Physics)
-DEFAULT_AWARENESS = 0.5     # phi parameter
-CRITICAL_THRESHOLD = 0.3    # Phase transition point
-NOISE_SCALE = 0.1           # eta parameter
-
-# --- 2. QUANTUM ENGINE (From quantum_harmonics.py) ---
-# We use 4 qubits to represent 16 conceptual states
+# --- 2. QUANTUM ENGINE ---
 NUM_QUBITS = 4
 dev = qml.device("default.qubit", wires=NUM_QUBITS)
 
@@ -28,12 +20,12 @@ def harmonic_state_circuit(amplitudes):
     return qml.probs(wires=range(NUM_QUBITS))
 
 def generate_phi_amplitudes(n_states):
-    """Generates amplitudes: |ψ⟩ = Σ φ⁻ⁿ |n⟩ (from quantum_harmonics.py)"""
+    """Generates amplitudes: |ψ⟩ = Σ φ⁻ⁿ |n⟩"""
     n = np.arange(n_states)
     amps = 1.0 / (PHI**n)
     return amps / np.linalg.norm(amps)
 
-# --- 3. BOOTSTRAP PHYSICS LOGIC (From PDF Section 3) ---
+# --- 3. BOOTSTRAP PHYSICS LOGIC ---
 def update_agent_state(current_state, attractor, awareness, noise_level):
     """
     Update Rule: Z' = Z + phi * Grad(Z^3) + eta
@@ -41,27 +33,27 @@ def update_agent_state(current_state, attractor, awareness, noise_level):
     # 1. Calculate Gradient towards Attractor (Meaning)
     gradient = attractor - current_state
     
-    # 2. Apply Awareness (phi) as amplification (PDF Source 74)
+    # 2. Apply Awareness (phi) as amplification
     drive = awareness * gradient
     
-    # 3. Add Noise (eta), inversely scaled by awareness (PDF Source 75)
-    # "Higher awareness inversely scales stochastic noise"
+    # 3. Add Noise (eta), inversely scaled by awareness
     effective_noise = (noise_level / (awareness + 0.1)) * np.random.randn(len(current_state))
     
     # 4. Update
     new_state = current_state + drive + effective_noise
     return new_state
 
-# --- 4. SESSION STATE ---
+# --- 4. SESSION STATE INITIALIZATION ---
 if 'init' not in st.session_state:
     n_states = 2**NUM_QUBITS
     
     # Initialize the "Bootstrap Attractor" (Z^3) using Phi Harmonics
     phi_amps = generate_phi_amplitudes(n_states)
-    attractor_probs = harmonic_state_circuit(phi_amps)
+    # We convert the QNode output to a numpy array immediately
+    attractor_probs = np.array(harmonic_state_circuit(phi_amps))
     
     # Initialize Agents (Random states seeking coherence)
-    st.session_state.attractor = np.array(attractor_probs)
+    st.session_state.attractor = attractor_probs
     st.session_state.agents = np.random.uniform(0, 0.1, (10, n_states)) # 10 Agents
     st.session_state.coherence_history = []
     st.session_state.step = 0
@@ -73,12 +65,15 @@ st.title("Φ Bootstrap Physics // Coherence Engine")
 # Sidebar: Physics Parameters
 with st.sidebar:
     st.header("Field Parameters")
-    awareness_phi = st.slider("Awareness (Φ)", 0.0, 1.0, 0.6, help="Amplification of meaning (PDF Sec 3)")
+    awareness_phi = st.slider("Awareness (Φ)", 0.0, 1.0, 0.6, help="Amplification of meaning")
     noise_eta = st.slider("Entropy (η)", 0.0, 0.5, 0.05, help="Stochastic noise")
     
-    # Phase Transition Indicator (PDF Section 5)
+    # Phase Transition Indicator
     stability = awareness_phi**2
-    threshold = noise_eta / (np.linalg.norm(st.session_state.attractor) + 1e-9)
+    # Avoid division by zero
+    norm = np.linalg.norm(st.session_state.attractor)
+    threshold = noise_eta / (norm + 1e-9)
+    
     status = "ORDERED" if stability > threshold else "CHAOS"
     st.metric("System Regime", status, delta=f"{stability - threshold:.4f}")
 
@@ -105,7 +100,7 @@ with st.sidebar:
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    # 1. Coherence History (The "Progress" Metric from PDF)
+    # 1. Coherence History
     if st.session_state.coherence_history:
         fig_coh = go.Figure()
         fig_coh.add_trace(go.Scatter(y=st.session_state.coherence_history, mode='lines', name='System Coherence', line=dict(color='#00ffcc', width=3)))
@@ -113,7 +108,7 @@ with col1:
         st.plotly_chart(fig_coh, use_container_width=True)
 
 with col2:
-    # 2. Quantum State Distribution (Visualizing quantum_harmonics.py output)
+    # 2. Quantum State Distribution
     fig_q = go.Figure()
     # Plot Attractor (Phi State)
     fig_q.add_trace(go.Bar(y=st.session_state.attractor, name='Attractor (Z³)', marker_color='gold'))
@@ -130,17 +125,14 @@ with col2:
     )
     st.plotly_chart(fig_q, use_container_width=True)
 
-# 3. Interference Pattern (Heatmap from quantum_harmonics.py)
+# 3. Interference Pattern
 st.markdown("### Φ-Scaled Quantum Interference Pattern")
 if st.session_state.init:
     # Simulate interference live
     phases = np.linspace(0, 2 * np.pi, 50)
     interference_map = []
     
-    # We re-run the circuit with phases (simulating logic from your script)
-    phi_amps = generate_phi_amplitudes(2**NUM_QUBITS)
-    
-    # Pre-calculate simplified interference for speed in UI
+    # Pre-calculate simplified interference for visualization speed
     base_probs = st.session_state.attractor
     for p in phases:
         # Simple modulation simulation for visualization speed
@@ -161,103 +153,7 @@ if st.session_state.init:
         yaxis_title="State Index |n⟩"
     )
     st.plotly_chart(fig_int, use_container_width=True)
-    max_allowed = MAX_RISK_RATIO * capital
-    excess = (risk_exposure - max_allowed).clamp(min=0)
-    
-    if excess.any():
-        # Deleveraging penalty
-        penalty = DELEVERAGING_SEVERITY * (excess / (capital + 1e-9))
-        prices = prices * (1 - penalty)
-    return prices
-
-def apply_tiered_liquidity(prices, target_prices, is_slow):
-    """Source 50: Slow agents (Institutions) respond with delay"""
-    delta = target_prices - prices
-    # Fast agents move full delta, Slow agents move partial
-    update = torch.where(is_slow, delta * SLOW_REACTION_RATE, delta)
-    return prices + update
-
-def apply_delivery_friction(prices, volumes, inventory, is_commodity):
-    """Source 50-51: Physical Delivery Constraints"""
-    delivery = volumes * MAX_DELIVERY_RATE
-    # Deplete inventory
-    inventory = (inventory - delivery).clamp(min=0)
-    
-    # Scarcity Premium
-    scarcity = 1.0 / (inventory + 1.0)
-    premium = SCARCITY_PREMIUM_FACTOR * scarcity
-    
-    # Apply only to commodity agents
-    prices = torch.where(is_commodity, prices * (1 + premium), prices)
-    return prices, inventory
-
-def apply_regime_shock(prices, baseline, latam_mask):
-    """Source 51-52: Endogenous Shocks (LatAm Cluster)"""
-    # Check divergence for LATAM cluster
-    if latam_mask.any():
-        cluster_prices = prices[latam_mask]
-        cluster_base = baseline[latam_mask]
-        divergence = (cluster_prices - cluster_base).abs().mean()
-        
-        if divergence > SHOCK_THRESHOLD:
-            # Apply shock
-            shock = torch.randn(latam_mask.sum()) * SHOCK_MAGNITUDE
-            prices[latam_mask] = prices[latam_mask] * (1 - shock.abs()) # Force drop
-            return prices, True
-    return prices, False
-
-def apply_memory_feedback(prices, memory):
-    """Source 52-53: Memory Support/Resistance"""
-    # Update memory (EMA)
-    memory = MEMORY_ALPHA * prices + (1 - MEMORY_ALPHA) * memory
-    # Pull prices toward memory
-    prices = prices + MEMORY_INFLUENCE * (memory - prices)
-    return prices, memory
-
-def compute_influence_consensus(prices, volumes, is_slow):
-    """Source 54: Dollar-Weighted Consensus (Z3)"""
-    power = (volumes * prices)
-    # Slow agents get 2.0x weight (Source 33)
-    weights = torch.where(is_slow, power * 2.0, power)
-    z3 = (prices * weights).sum() / (weights.sum() + 1e-9)
-    return z3.item()
-
-# --- 3. INITIALIZATION (Adapting Source 43-48 for Web) ---
-def init_simulation():
-    # 1. Fetch Data
-    try:
-        data = yf.download(TICKERS, period="5d", interval="1d", progress=False)['Close']
-        base_prices = data.iloc[-1].fillna(150.0)
-    except:
-        # Fallback if API fails
-        base_prices = pd.Series(np.random.uniform(100, 200, len(TICKERS)), index=TICKERS)
-
-    # 2. Create Derivatives (Source 47)
-    agent_rows = []
-    for ticker, price in base_prices.items():
-        # Underlying Agent
-        agent_rows.append({'id': ticker, 'price': price, 'parent': ticker})
-        # Derivative Agents
-        for d in range(DERIVATIVES_PER_TICKER):
-            d_price = price * np.random.uniform(0.95, 1.05)
-            agent_rows.append({'id': f"{ticker}_D{d+1}", 'price': d_price, 'parent': ticker})
-            
-    df = pd.DataFrame(agent_rows)
-    num_agents = len(df)
-    
-    # 3. Create Tensors
-    prices = torch.tensor(df['price'].values, dtype=torch.float32)
-    
-    state = {
-        'prices': prices,
-        'baseline': prices.clone(),
-        'volumes': torch.ones(num_agents) * 10000, 
-        'capital': prices * 10000 * 1.5,
-        'memory': prices.clone(),
-        'inventory': torch.ones(num_agents) * 1000,
-        'history_z3': [],
-        'step': 0,
-        'ids': df['id'].tolist(),
+df['id'].tolist(),
         'parents': df['parent'].tolist()
     }
     
