@@ -1,39 +1,166 @@
 import streamlit as st
-import torch
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import yfinance as yf
+import pennylane as qml
+import torch
 
-# --- 1. CONFIGURATION (Matching Notebook Source 32-34) ---
-st.set_page_config(page_title="Emergent Marketplace", layout="wide", page_icon="⚡")
-DEVICE = "cpu"
-torch.manual_seed(42)
-np.random.seed(42)
+# --- 1. CONFIGURATION & ANCHORS ---
+st.set_page_config(page_title="Bootstrap Physics Node", layout="wide", page_icon="Φ")
+PHI = (1 + np.sqrt(5)) / 2  # The Golden Ratio (from quantum_harmonics.py)
 
-# Physics Constants
-MAX_RISK_RATIO = 0.3
-DELEVERAGING_SEVERITY = 0.02
-SLOW_AGENT_RATIO = 0.3
-SLOW_REACTION_RATE = 0.05
-SHOCK_THRESHOLD = 0.10
-SHOCK_MAGNITUDE = 0.15
-MEMORY_ALPHA = 0.1
-MEMORY_INFLUENCE = 0.05
-SCARCITY_PREMIUM_FACTOR = 0.1
-MAX_DELIVERY_RATE = 0.02
-DERIVATIVES_PER_TICKER = 3  # From Source 32
+# Constants from PDF (Bootstrap Physics)
+DEFAULT_AWARENESS = 0.5     # phi parameter
+CRITICAL_THRESHOLD = 0.3    # Phase transition point
+NOISE_SCALE = 0.1           # eta parameter
 
-# Ticker Clusters
-TICKERS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'GLD', 'SLV', 'PBR', 'VALE', 'AMD', 'NFLX']
-COMMODITY_TICKERS = ['GLD', 'SLV', 'GC=F', 'SI=F']
-LATAM_TICKERS = ['PBR', 'EC', 'VALE']
+# --- 2. QUANTUM ENGINE (From quantum_harmonics.py) ---
+# We use 4 qubits to represent 16 conceptual states
+NUM_QUBITS = 4
+dev = qml.device("default.qubit", wires=NUM_QUBITS)
 
-# --- 2. PHYSICS ENGINE (Exact Port from Sources 49-54) ---
+@qml.qnode(dev)
+def harmonic_state_circuit(amplitudes):
+    """Constructs the quantum state based on harmonic/phi scaling."""
+    # Normalize
+    amplitudes = amplitudes / np.sqrt(np.sum(np.abs(amplitudes)**2))
+    qml.StatePrep(amplitudes, wires=range(NUM_QUBITS))
+    return qml.probs(wires=range(NUM_QUBITS))
 
-def apply_basel_constraints(prices, volumes, capital):
-    """Source 49: Basel III Capital Constraints"""
-    risk_exposure = prices * volumes
+def generate_phi_amplitudes(n_states):
+    """Generates amplitudes: |ψ⟩ = Σ φ⁻ⁿ |n⟩ (from quantum_harmonics.py)"""
+    n = np.arange(n_states)
+    amps = 1.0 / (PHI**n)
+    return amps / np.linalg.norm(amps)
+
+# --- 3. BOOTSTRAP PHYSICS LOGIC (From PDF Section 3) ---
+def update_agent_state(current_state, attractor, awareness, noise_level):
+    """
+    Update Rule: Z' = Z + phi * Grad(Z^3) + eta
+    """
+    # 1. Calculate Gradient towards Attractor (Meaning)
+    gradient = attractor - current_state
+    
+    # 2. Apply Awareness (phi) as amplification (PDF Source 74)
+    drive = awareness * gradient
+    
+    # 3. Add Noise (eta), inversely scaled by awareness (PDF Source 75)
+    # "Higher awareness inversely scales stochastic noise"
+    effective_noise = (noise_level / (awareness + 0.1)) * np.random.randn(len(current_state))
+    
+    # 4. Update
+    new_state = current_state + drive + effective_noise
+    return new_state
+
+# --- 4. SESSION STATE ---
+if 'init' not in st.session_state:
+    n_states = 2**NUM_QUBITS
+    
+    # Initialize the "Bootstrap Attractor" (Z^3) using Phi Harmonics
+    phi_amps = generate_phi_amplitudes(n_states)
+    attractor_probs = harmonic_state_circuit(phi_amps)
+    
+    # Initialize Agents (Random states seeking coherence)
+    st.session_state.attractor = np.array(attractor_probs)
+    st.session_state.agents = np.random.uniform(0, 0.1, (10, n_states)) # 10 Agents
+    st.session_state.coherence_history = []
+    st.session_state.step = 0
+    st.session_state.init = True
+
+# --- 5. DASHBOARD UI ---
+st.title("Φ Bootstrap Physics // Coherence Engine")
+
+# Sidebar: Physics Parameters
+with st.sidebar:
+    st.header("Field Parameters")
+    awareness_phi = st.slider("Awareness (Φ)", 0.0, 1.0, 0.6, help="Amplification of meaning (PDF Sec 3)")
+    noise_eta = st.slider("Entropy (η)", 0.0, 0.5, 0.05, help="Stochastic noise")
+    
+    # Phase Transition Indicator (PDF Section 5)
+    stability = awareness_phi**2
+    threshold = noise_eta / (np.linalg.norm(st.session_state.attractor) + 1e-9)
+    status = "ORDERED" if stability > threshold else "CHAOS"
+    st.metric("System Regime", status, delta=f"{stability - threshold:.4f}")
+
+    if st.button("RUN QUANTUM STEP"):
+        # Run Physics Loop
+        new_agents = []
+        coherence_sum = 0
+        
+        for agent in st.session_state.agents:
+            # Update Agent using Bootstrap Rule
+            updated = update_agent_state(agent, st.session_state.attractor, awareness_phi, noise_eta)
+            new_agents.append(updated)
+            
+            # Measure Coherence (Distance to Attractor)
+            dist = np.linalg.norm(updated - st.session_state.attractor)
+            coherence_sum += (1.0 / (dist + 1e-9)) # Inverse distance = coherence
+            
+        st.session_state.agents = np.array(new_agents)
+        st.session_state.coherence_history.append(coherence_sum)
+        st.session_state.step += 1
+        st.rerun()
+
+# --- 6. VISUALIZATION ---
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    # 1. Coherence History (The "Progress" Metric from PDF)
+    if st.session_state.coherence_history:
+        fig_coh = go.Figure()
+        fig_coh.add_trace(go.Scatter(y=st.session_state.coherence_history, mode='lines', name='System Coherence', line=dict(color='#00ffcc', width=3)))
+        fig_coh.update_layout(title="System Coherence Evolution (Δs)", template="plotly_dark", height=400)
+        st.plotly_chart(fig_coh, use_container_width=True)
+
+with col2:
+    # 2. Quantum State Distribution (Visualizing quantum_harmonics.py output)
+    fig_q = go.Figure()
+    # Plot Attractor (Phi State)
+    fig_q.add_trace(go.Bar(y=st.session_state.attractor, name='Attractor (Z³)', marker_color='gold'))
+    # Plot Mean Agent State
+    mean_agent = np.mean(st.session_state.agents, axis=0)
+    fig_q.add_trace(go.Scatter(y=mean_agent, mode='lines+markers', name='Collective Mind', line=dict(color='cyan')))
+    
+    fig_q.update_layout(
+        title="Quantum Harmonic State |n⟩", 
+        template="plotly_dark", 
+        height=400,
+        yaxis_type="log",
+        xaxis_title="State Index (0-15)"
+    )
+    st.plotly_chart(fig_q, use_container_width=True)
+
+# 3. Interference Pattern (Heatmap from quantum_harmonics.py)
+st.markdown("### Φ-Scaled Quantum Interference Pattern")
+if st.session_state.init:
+    # Simulate interference live
+    phases = np.linspace(0, 2 * np.pi, 50)
+    interference_map = []
+    
+    # We re-run the circuit with phases (simulating logic from your script)
+    phi_amps = generate_phi_amplitudes(2**NUM_QUBITS)
+    
+    # Pre-calculate simplified interference for speed in UI
+    base_probs = st.session_state.attractor
+    for p in phases:
+        # Simple modulation simulation for visualization speed
+        modulated = base_probs * (1 + 0.5 * np.cos(p * np.arange(len(base_probs))))
+        interference_map.append(modulated)
+        
+    fig_int = go.Figure(data=go.Heatmap(
+        z=np.array(interference_map).T,
+        x=phases,
+        y=np.arange(len(base_probs)),
+        colorscale='Magma'
+    ))
+    fig_int.update_layout(
+        title="Phase Shift Interference (Memory Formation)",
+        template="plotly_dark",
+        height=400,
+        xaxis_title="Phase Shift (θ)",
+        yaxis_title="State Index |n⟩"
+    )
+    st.plotly_chart(fig_int, use_container_width=True)
     max_allowed = MAX_RISK_RATIO * capital
     excess = (risk_exposure - max_allowed).clamp(min=0)
     
